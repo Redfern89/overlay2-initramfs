@@ -1,0 +1,3 @@
+hooks/overlay2                  usr/share/initramfs-tools/hooks/
+scripts/overlay2                usr/share/initramfs-tools/scripts/
+scripts/init-top/parse-overlay2 usr/share/initramfs-tools/scripts/init-top/

@@ -1,0 +1,5 @@
+overlay2-initramfs (1.0.0) unstable; urgency=medium
+
+  * Initial release of overlay2 initramfs boot script.
+
+ -- Bro <bro@localhost>  Sun, 08 Nov 2026 10:00:00 +0300

@@ -1,0 +1,387 @@
+#!/bin/sh
+
+export live_directory=overlay2
+export persistence_mnt_path="/run/${live_directory}/persistence"
+export live_temp_path="/run/${live_directory}/tmp"
+
+# $1 - File descriptor (e.g. /dev/sda1, /sys/class/net/wlan0/address)
+# $2 - Timeout in sec
+# $3 - Wait for type (file, block, symlink, dir)
+wait_for() {
+	local waitfor="${1}"
+	local timeout=$2
+	local devtype="${3}"
+	local timecnt=0
+
+	while [ $timecnt -lt $timeout ]; do
+		[ "${devtype}" = "file" ] && [ -f "${waitfor}" ] && return 0
+		[ "${devtype}" = "block" ] && [ -b "${waitfor}" ] && return 0
+		[ "${devtype}" = "symlink" ] && [ -L "${waitfor}" ] && return 0
+		[ "${devtype}" = "dir" ] && [ -d "${waitfor}" ] && return 0
+
+		echo -n "${timecnt} "
+
+		timecnt=$((timecnt + 1))
+		sleep 1
+	done
+
+	return 1
+}
+
+get_fs_tag() {
+	local device="${1}"
+	local tag="${2}"
+
+	blkid "${device}" --match-tag "${tag}" --output value
+}
+
+unssl() {
+	if [ -z "${tmp_storage_uuid}" ]; then
+		panic "Error SSL decode. tmp-storage-uuid is not specified."
+	fi
+
+	local input="${1}"
+	local output="${2}"
+	local ssl_key_file_path="${live_temp_path}/tmp-storage-${tmp_storage_uuid}/${ssl_keys_file}"
+	
+	if [ -f "${ssl_key_file_path}" ]; then
+		local ssl_aes256_key=$(cat "${ssl_key_file_path}" | awk -F' ' '{print $1}')
+		local ssl_iv=$(cat "${ssl_key_file_path}" | awk -F' ' '{print $2}')
+
+		if [ ! -z "${ssl_aes256_key}" ] && [ ! -z "${ssl_iv}" ]; then
+			KEY="${ssl_aes256_key}" IV="${ssl_iv}" sh -c 'openssl enc -d -aes-256-ctr -nosalt -K "$KEY" -iv "$IV" -in "'"${input}"'" -out "'"${output}"'"'
+
+			KEY=""
+			IV=""
+			ssl_aes256_key=""
+			ssl_iv=""
+		else
+			panic "Bad SSL keys"
+		fi
+	else
+		panic "SSL key file ${ssl_key_file_path} not found"
+	fi
+}
+
+setup_tmp_storage() {
+	local tmp_storage_path="/dev/disk/by-uuid/${tmp_storage_uuid}"
+
+	if [ ! -z "${tmp_storage_uuid}" ]; then
+		echo "Waiting for ${tmp_storage_uuid} device"
+		wait_for "${tmp_storage_path}" 10 "block"
+
+		if [ -b "${tmp_storage_path}" ]; then
+			local tmp_storage_mnt="${live_temp_path}/tmp-storage-${tmp_storage_uuid}"
+			local tmp_storage_type=$(get_fs_tag "${tmp_storage_path}" "TYPE")
+
+			mkdir -p "${tmp_storage_mnt}"
+
+			if [ ! -z "${tmp_storage_type}" ]; then
+				modprobe "${tmp_storage_type}"
+
+				if ! mount -t "${tmp_storage_type}" -o ro "${tmp_storage_path}" "${tmp_storage_mnt}"; then
+					panic "Unsupported storage"
+				fi
+			else
+				panic "Unsupported storage"
+			fi
+		fi
+	fi
+}
+
+uncryptsetup() {
+	local path="${1}"
+	local UUID="${2}"
+	local attempt=0
+	local max_attempts=3
+	local luks_loop_dev="/dev/mapper/luks-${UUID}"
+	local tmp_storage_mnt="${live_temp_path}/tmp-storage-${tmp_storage_uuid}"
+	local luks_header="${tmp_storage_mnt}/${persistence_header}"
+	local luks_ssl_header="${live_temp_path}/ssl_header_decoded-${UUID}"
+	local luks_key_file="${tmp_storage_mnt}/${persistence_key_file}"
+	local current_luks_header=
+
+	modprobe dm-mod
+	modprobe dm-crypt
+
+	modprobe af_alg
+	modprobe algif_skcipher
+	modprobe algif_hash
+	modprobe crypto_user
+
+	modprobe aesni-intel 2>/dev/null || modprobe aes_generic
+	modprobe xts
+	modprobe sha256
+	modprobe sha512
+
+	# Если существует заголовок - определяемся
+	if [ -f "${luks_header}" ]; then
+		current_luks_header="${luks_header}"
+	fi
+
+	# Но если завалялся расшифрованный заголовок - определяем именно его
+	if [ -f "${luks_ssl_header}" ]; then
+		current_luks_header="${luks_ssl_header}"
+	fi
+
+	# Если указали ключ - пробуем расшифроваться с ним
+	if [ -f "${luks_key_file}" ]; then
+		if [ -f "${current_luks_header}" ]; then # Если вдруг заголовк отдельно - пробуем расшифровку с ним
+			if cryptsetup open --header "${current_luks_header}" --key-file="${luks_key_file}" "${path}" "luks-${UUID}"; then
+				return 0 # Если все ок - выходим полностью из этой функции, дальше нам нельзя
+			fi
+		else # Если без заголовка - тоже самое все
+			if cryptsetup open --key-file="${luks_key_file}" "${path}" "luks-${UUID}"; then
+				return 0
+			fi
+		fi
+	fi
+
+	# Если ключа не нашлось - пробуем спросить пароль
+	while [ ! -b "${luks_loop_dev}" ]; do
+		if [ $attempt -ge $max_attempts ]; then
+			panic "Device ${path} unlock failed"
+		fi
+
+		attempt=$((attempt + 1))
+
+		if [ -f "${current_luks_header}" ]; then
+			./lib/cryptsetup/askpass "Please, unlock ${UUID} (attempt ${attempt}/${max_attempts}): " | cryptsetup open --header "${current_luks_header}" --key-file=- "${path}" "luks-${UUID}"
+		else
+			./lib/cryptsetup/askpass "Please, unlock ${UUID} (attempt ${attempt}/${max_attempts}): " | cryptsetup open --key-file=- "${path}" "luks-${UUID}"
+		fi
+
+		sleep 1 # Даем udev отдышаться
+	done
+}
+
+setup_local_fs() {
+	local path="${1}"
+	local mnt="${2}"
+	local as_loop="${3}"
+	local as_union="${4}"
+	local fs_type=$(get_fs_tag "${path}" "TYPE")
+	local fs_uuid=$(get_fs_tag "${path}" "UUID")
+	local mnt_flags="rw"
+	local tmp_storage="${live_temp_path}/tmp-storage-${tmp_storage_uuid}"
+	local luks_header_file="${tmp_storage}/${persistence_header}"
+
+	if [ "${as_loop}" = "loop" ]; then
+		modprobe loop # Малоли не взлетело в setup_union_fs
+		mnt_flags="loop,rw"
+	fi
+
+	# Если ничего не определили - пытаемся понять, указан ли заголовок
+	if [ ! -z "${persistence_header}" ]; then
+		if [ -f "${luks_header_file}" ]; then
+			if [ -z "${fs_type}" ] || [ -z "${fs_uuid}" ]; then
+				fs_type=$(get_fs_tag "${luks_header_file}" "TYPE")
+				fs_uuid=$(get_fs_tag "${luks_header_file}" "UUID")
+
+				# А если и там ничего нет - пытаемся его расшифровать
+				if [ -z "${fs_type}" ] || [ -z "${fs_uuid}" ]; then
+					local ssl_persistence_header_path="${live_temp_path}/ssl_header_decoded"
+					unssl "${luks_header_file}" "${ssl_persistence_header_path}"
+
+					fs_type=$(get_fs_tag "${ssl_persistence_header_path}" "TYPE")
+					fs_uuid=$(get_fs_tag "${ssl_persistence_header_path}" "UUID")
+
+					local new_hdr_path="${ssl_persistence_header_path}-${fs_uuid}"
+					mv "${ssl_persistence_header_path}" "${new_hdr_path}"
+
+					if [ ! -f "${new_hdr_path}" ]; then
+						panic "Failed to decode SSL"
+					fi
+				fi
+			fi
+		else
+			panic "Persistence detached header not found"
+		fi
+	else
+		panic "Parameter persistence-header= not specified"
+	fi
+
+	# Ну малоли. Если дошли до сюда с пустыми руками - тут точно падаем
+	if [ -z "${fs_type}" ] || [ -z "${fs_uuid}" ]; then
+		panic "Unsupported containing file system"
+	fi
+
+	case "${fs_type}" in
+		ext2|ext3|ext4|f2fs|hfs)
+			mkdir -p "${mnt}"
+			modprobe "${fs_type}"
+
+			if ! mount -t "${fs_type}" -o "${mnt_flags}" "${path}" "${mnt}"; then
+				panic "Unable to mount ${path} file system"
+			fi
+		;;
+		ntfs|ntfs3|exfat|fat|fat32)
+			if [ -z "${as_union}" ]; then
+				if ! mount -t "${fs_type}" -o "${mnt_flags}" "${path}" "${mnt}"; then
+					panic "Unable to mount ${path} file system"
+				fi
+			else
+				panic "Unsupported containing file system: ${fs_type}"
+			fi
+		;;
+		crypto_LUKS)
+			uncryptsetup "${path}" "${fs_uuid}"
+
+			local luks_mapper_dev="/dev/mapper/luks-${fs_uuid}"
+			local luks_fs_type=$(get_fs_tag "${luks_mapper_dev}" "TYPE")
+
+			case "${luks_fs_type}" in
+				ext2|ext3|ext4|f2fs)
+					modprobe "${luks_fs_type}"
+
+					if ! mount -t "${luks_fs_type}" -o rw "${luks_mapper_dev}" "${mnt}"; then
+						panic "Unable to mount ${path} file system"
+					fi
+				;;
+				ntfs|ntfs3|exfat|fat|fat32)
+					if [ -z "${as_union}" ]; then
+						modprobe -q "${luks_fs_type}" # Упал? и хуй с тобой
+
+						if ! mount -t "${luks_fs_type}" -o rw "${luks_mapper_dev}" "${mnt}"; then
+							panic "Unable to mount ${path} file system"
+						fi
+					else
+						panic "Unsupported containing file system"
+					fi
+				;;
+				*)
+					panic "Unsupported containing file system"
+				;;
+			esac
+		;;
+		*)
+			panic "Unsupported containing file system"
+		;;
+	esac
+}
+
+setup_persistence_storage() {
+	local persistence_path="${persistence_mnt_path}/${persistence_storage_path}"
+	mkdir -p "${persistence_mnt_path}"
+
+	case "${persistence_src}" in
+		ram)
+			[ -z "${persistence_ram_size}" ] && persistence_ram_size="50%"
+			mount -t tmpfs -o size="${persistence_ram_size}" tmpfs "${persistence_mnt_path}"
+			maybe_break persistence-ram
+		;;
+		storage)
+			local persistence_storage_dev="/dev/disk/by-uuid/${persistence_storage_uuid}"
+
+			echo "Waiting for ${persistence_storage_uuid} device"
+			wait_for "${persistence_storage_dev}" 10 "block"
+
+			if [ -b "${persistence_storage_dev}" ]; then
+				setup_local_fs "${persistence_storage_dev}" "${persistence_mnt_path}" "storage" "union"
+			else
+				panic "Block device ${persistence_storage_dev} not found"
+			fi
+		;;
+		loop)
+			local persistence_storage_loop="/run/${live_directory}/storage-${storage_uuid}/${persistence_loop}"
+
+			if [ -f "${persistence_storage_loop}" ]; then
+				setup_local_fs "${persistence_storage_loop}" "${persistence_mnt_path}" "loop" "union"
+			else
+				panic "File ${persistence_loop} not found"
+			fi
+		;;
+	esac
+
+	mkdir -p "${persistence_path}/rw"
+	mkdir -p "${persistence_path}/work"
+}
+
+setup_union_fs() {
+	modprobe loop
+	modprobe overlay
+
+	local storage_dev="/dev/disk/by-uuid/${storage_uuid}"
+	wait_for "${storage_dev}" 10 "block"
+
+	if [ ! -b "${storage_dev}" ]; then
+		panic "Storage ${storage_uuid} not found"
+	fi
+
+	local storage_type=$(get_fs_tag "${storage_dev}" "TYPE")
+	local storage_uuid=$(get_fs_tag "${storage_dev}" "UUID")
+
+	if [ -z "${storage_type}" ] || [ -z "${storage_uuid}" ]; then
+		panic "Unsupported storage file system"
+	fi
+
+	case "${storage_type}" in
+		ext2|ext3|ext4|f2fs|exfat|vfat|ntfs)
+			local storage_mnt="/run/${live_directory}/storage-${storage_uuid}"
+			mkdir -p "${storage_mnt}"
+			modprobe "${storage_type}"
+
+			if ! mount -t "${storage_type}" -o rw "${storage_dev}" "${storage_mnt}"; then
+				panic "Unable to mount storage"
+			fi
+
+			local overlay_loop_ro="${storage_mnt}/${overlay_loop}"
+			local overlay_loop_mnt="/run/${live_directory}/overlay_ro-$(basename ${overlay_loop_ro})"
+
+			if [ -f "${overlay_loop_ro}" ]; then
+				local overlay_loop_ro_type=$(get_fs_tag "${overlay_loop_ro}" "TYPE")
+				case "${overlay_loop_ro_type}" in
+					squashfs|btrfs|iso9660)
+						mkdir -p "${overlay_loop_mnt}"
+						if ! mount -o loop,ro -t "${overlay_loop_ro_type}" "${overlay_loop_ro}" "${overlay_loop_mnt}"; then
+							panic "Unable to mount overlay container"
+						fi
+						setup_persistence_storage
+						local persistence_path="${persistence_mnt_path}/${persistence_storage_path}"
+
+						if ! mount -t overlay overlay -o lowerdir="${overlay_loop_mnt}",upperdir="${persistence_path}/rw",workdir="${persistence_path}/work" "${rootmnt?}"; then
+							panic "Failed to mount OverlayFS into ${rootmnt}"
+						fi
+					;;
+					*)
+						panic "Unsupported container file system"
+					;;
+				esac 
+			else
+				panic "Unable to find ${overlay_loop_ro} file"
+			fi			
+		;;
+		*)
+			panic "Unsupported storage file system ${storage_type}"
+		;;
+	esac
+	maybe_break after-overlay
+}
+
+cleanup() {
+	if [ ! -z "${tmp_storage_uuid}" ]; then
+		local tmp_storage="${live_temp_path}/tmp-storage-${tmp_storage_uuid}"
+		if ! umount "${tmp_storage}"; then
+			panic "Cannot umount ${tmp_storage_uuid} device"
+		fi
+	fi
+
+	rm -rf "${live_temp_path}"
+
+	if [ -d "${live_temp_path}" ]; then
+		panic "Unable to remove temporary directory"
+	fi
+
+	unset live_directory
+	unset persistence_mnt_path
+	unset live_temp_path
+}
+
+mountroot() {
+	# пока что тут
+	mkdir -p "${live_temp_path}"
+
+	setup_tmp_storage
+	setup_union_fs
+	cleanup
+}

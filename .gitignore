@@ -1,0 +1,12 @@
+*.deb
+*.buildinfo
+*.changes
+.github/workflows/
+.vscode/
+.build/
+debian/.debhelper/
+debian/files
+debian/debhelper-build-stamp
+debian/*.substvars
+debian/overlay2-initramfs/
+init_repo.sh

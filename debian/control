@@ -1,0 +1,14 @@
+Source: overlay2-initramfs
+Section: admin
+Priority: optional
+Maintainer: Redfern89 <Redfern89@localhost>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+
+Package: overlay2-initramfs
+Architecture: all
+Depends: ${misc:Depends}, initramfs-tools, cryptsetup, openssl, util-linux, gawk | mawk
+Description: Custom initramfs boot script with OverlayFS, LUKS detached headers and OpenSSL
+ POSIX-compliant initramfs-tools boot script implementing Live root mount
+ using OverlayFS with persistence (RAM, storage, loop), LUKS detached headers,
+ and AES-256-CTR OpenSSL header encryption.

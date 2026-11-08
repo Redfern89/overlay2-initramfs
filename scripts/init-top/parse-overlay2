@@ -1,0 +1,22 @@
+#!/bin/sh
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case $1 in prereqs) prereqs; exit 0;; esac
+
+grep -q "boot=overlay2" /proc/cmdline || exit 0
+
+for x in $(cat /proc/cmdline); do
+    case $x in
+        storage-uuid=*)             echo "storage_uuid=${x#*=}" >> /conf/param.conf ;;
+        overlay-loop=*)             echo "overlay_loop=${x#*=}" >> /conf/param.conf ;;
+        persistence-src=*)          echo "persistence_src=${x#*=}" >> /conf/param.conf ;;
+        persistence-ram-size=*)     echo "persistence_ram_size=${x#*=}" >> /conf/param.conf ;;
+        persistence-storage-uuid=*) echo "persistence_storage_uuid=${x#*=}" >> /conf/param.conf ;;
+        persistence-loop=*)         echo "persistence_loop=${x#*=}" >> /conf/param.conf ;;
+        persistence-storage-path=*) echo "persistence_storage_path=${x#*=}" >> /conf/param.conf ;;
+        tmp-storage-uuid=*)         echo "tmp_storage_uuid=${x#*=}" >> /conf/param.conf ;;
+        persistence-header=*)       echo "persistence_header=${x#*=}" >> /conf/param.conf ;;
+        persistence-key-file=*)     echo "persistence_key_file=${x#*=}" >> /conf/param.conf ;;
+        ssl-keys-file=*)            echo "ssl_keys_file=${x#*=}" >> /conf/param.conf ;;
+    esac
+done
