@@ -96,4 +96,4 @@ sudo make update
 - `debian/` — метаданные и сценарии Debian-пакета.
 - `Makefile` — ручная установка, удаление, обновление initramfs и сборка пакета.
 
-Лицензия: GPL-3.0-or-later (см. `debian/copyright`).
+Лицензия: GPL-3.0-or-later (см. `LICENSE`, `debian/copyright`).
