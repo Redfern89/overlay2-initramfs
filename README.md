@@ -48,6 +48,11 @@ boot=overlay2 storage-uuid=1234-5678 overlay-loop=debian.squashfs persistence-sr
 | `do-overlay` | До монтирования OverlayFS |
 | `after-overlay` | После монтирования основного устройства |
 
+## Требования и зависимости
+
+> `openssl`, `cryptsetup`
+> `dm-crypt`, `dm-mod`
+
 ## Сборка и установка
 
 ### Сборка Debian-пакета
