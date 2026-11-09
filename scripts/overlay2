@@ -197,8 +197,6 @@ setup_local_fs() {
 		else
 			panic "Persistence detached header not found"
 		fi
-	else
-		panic "Parameter persistence-header= not specified"
 	fi
 
 	# Ну малоли. Если дошли до сюда с пустыми руками - тут точно падаем
@@ -216,6 +214,9 @@ setup_local_fs() {
 			fi
 		;;
 		ntfs|ntfs3|exfat|fat|fat32)
+			mkdir -p "${mnt}"
+			modprobe "${fs_type}"
+
 			if [ -z "${as_union}" ]; then
 				if ! mount -t "${fs_type}" -o "${mnt_flags}" "${path}" "${mnt}"; then
 					panic "Unable to mount ${path} file system"
@@ -233,6 +234,7 @@ setup_local_fs() {
 			case "${luks_fs_type}" in
 				ext2|ext3|ext4|f2fs)
 					modprobe "${luks_fs_type}"
+					mkdir -p "${mnt}"
 
 					if ! mount -t "${luks_fs_type}" -o rw "${luks_mapper_dev}" "${mnt}"; then
 						panic "Unable to mount ${path} file system"
@@ -241,6 +243,7 @@ setup_local_fs() {
 				ntfs|ntfs3|exfat|fat|fat32)
 					if [ -z "${as_union}" ]; then
 						modprobe -q "${luks_fs_type}" # Упал? и хуй с тобой
+						mkdir -p "${mnt}"
 
 						if ! mount -t "${luks_fs_type}" -o rw "${luks_mapper_dev}" "${mnt}"; then
 							panic "Unable to mount ${path} file system"
@@ -322,7 +325,7 @@ setup_storage() {
 	fi
 
 	case "${storage_type}" in
-		ext2|ext3|ext4|f2f2|exfat|vfat|ntfs)
+		ext2|ext3|ext4|f2fs|exfat|vfat|ntfs)
 			local storage_mnt="/run/${live_directory}/storage-${storage_uuid}"
 			mkdir -p "${storage_mnt}"
 			modprobe "${storage_type}"
@@ -350,7 +353,7 @@ setup_union_fs() {
 	if [ -f "${overlay_loop_ro}" ]; then
 		local overlay_loop_ro_type=$(get_fs_tag "${overlay_loop_ro}" "TYPE")
 		case "${overlay_loop_ro_type}" in
-			ext2|ext3|ext4|squashfs|btrfs|iso9660|xfs|jffs2)
+			ext2|ext3|ext4|squashfs|btrfs|iso9660|xfs|f2fs|jffs2)
 				mkdir -p "${overlay_loop_mnt}"
 				if ! mount -o loop,ro -t "${overlay_loop_ro_type}" "${overlay_loop_ro}" "${overlay_loop_mnt}"; then
 					panic "Unable to mount overlay container"
