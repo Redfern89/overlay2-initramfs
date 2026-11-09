@@ -64,7 +64,7 @@ boot=overlay2 storage-uuid=1234-5678 overlay-loop=debian.squashfs persistence-sr
 
 ```bash
 sudo apt update
-sudo apt install build-essential debhelper dpkg-dev
+sudo apt install initramfs-tools build-essential debhelper dpkg-dev
 make deb
 ```
 
