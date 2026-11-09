@@ -1,6 +1,6 @@
 #!/bin/sh
 
-export live_directory=overlay2
+export live_directory=overlay2-initramfs
 export persistence_mnt_path="/run/${live_directory}/persistence"
 export live_temp_path="/run/${live_directory}/tmp"
 
@@ -297,26 +297,28 @@ setup_persistence_storage() {
 	mkdir -p "${persistence_path}/work"
 }
 
-setup_union_fs() {
-	modprobe loop
-	modprobe overlay
+setup_storage() {
+	maybe_break do-storage
+	if [ -z "${storage_uuid}" ]; then
+		panic "Parameter storage-uuid= is not specified"
+	fi
 
 	local storage_dev="/dev/disk/by-uuid/${storage_uuid}"
 	wait_for "${storage_dev}" 10 "block"
 
 	if [ ! -b "${storage_dev}" ]; then
-		panic "Storage ${storage_uuid} not found"
+		panic "Storage ${storage_dev} not found"
 	fi
 
 	local storage_type=$(get_fs_tag "${storage_dev}" "TYPE")
 	local storage_uuid=$(get_fs_tag "${storage_dev}" "UUID")
 
 	if [ -z "${storage_type}" ] || [ -z "${storage_uuid}" ]; then
-		panic "Unsupported storage file system"
+		panic "Bad storage filesystem"
 	fi
 
-	case "${storage_type}" in
-		ext2|ext3|ext4|f2fs|exfat|vfat|ntfs)
+	case "${storage_type}" is
+		ext2|ext3|ext4|f2f2|exfat|vfat|ntfs)
 			local storage_mnt="/run/${live_directory}/storage-${storage_uuid}"
 			mkdir -p "${storage_mnt}"
 			modprobe "${storage_type}"
@@ -324,37 +326,45 @@ setup_union_fs() {
 			if ! mount -t "${storage_type}" -o rw "${storage_dev}" "${storage_mnt}"; then
 				panic "Unable to mount storage"
 			fi
-
-			local overlay_loop_ro="${storage_mnt}/${overlay_loop}"
-			local overlay_loop_mnt="/run/${live_directory}/overlay_ro-$(basename ${overlay_loop_ro})"
-
-			if [ -f "${overlay_loop_ro}" ]; then
-				local overlay_loop_ro_type=$(get_fs_tag "${overlay_loop_ro}" "TYPE")
-				case "${overlay_loop_ro_type}" in
-					squashfs|btrfs|iso9660)
-						mkdir -p "${overlay_loop_mnt}"
-						if ! mount -o loop,ro -t "${overlay_loop_ro_type}" "${overlay_loop_ro}" "${overlay_loop_mnt}"; then
-							panic "Unable to mount overlay container"
-						fi
-						setup_persistence_storage
-						local persistence_path="${persistence_mnt_path}/${persistence_storage_path}"
-
-						if ! mount -t overlay overlay -o lowerdir="${overlay_loop_mnt}",upperdir="${persistence_path}/rw",workdir="${persistence_path}/work" "${rootmnt?}"; then
-							panic "Failed to mount OverlayFS into ${rootmnt}"
-						fi
-					;;
-					*)
-						panic "Unsupported container file system"
-					;;
-				esac 
-			else
-				panic "Unable to find ${overlay_loop_ro} file"
-			fi			
 		;;
 		*)
 			panic "Unsupported storage file system ${storage_type}"
 		;;
 	esac
+	maybe_break after-storage
+}
+
+setup_union_fs() {
+	maybe_break do-overlay
+	modprobe loop
+	modprobe overlay
+
+	local storage_mnt="/run/${live_directory}/storage-${storage_uuid}"
+	local overlay_loop_ro="${storage_mnt}/${overlay_loop}"
+	local overlay_loop_mnt="/run/${live_directory}/overlay_ro-$(basename ${overlay_loop_ro})"
+
+	if [ -f "${overlay_loop_ro}" ]; then
+		local overlay_loop_ro_type=$(get_fs_tag "${overlay_loop_ro}" "TYPE")
+		case "${overlay_loop_ro_type}" in
+			squashfs|btrfs|iso9660|xfs|jffs2)
+				mkdir -p "${overlay_loop_mnt}"
+				if ! mount -o loop,ro -t "${overlay_loop_ro_type}" "${overlay_loop_ro}" "${overlay_loop_mnt}"; then
+					panic "Unable to mount overlay container"
+				fi
+				setup_persistence_storage
+				local persistence_path="${persistence_mnt_path}/${persistence_storage_path}"
+
+				if ! mount -t overlay overlay -o lowerdir="${overlay_loop_mnt}",upperdir="${persistence_path}/rw",workdir="${persistence_path}/work" "${rootmnt?}"; then
+					panic "Failed to mount OverlayFS into ${rootmnt}"
+				fi
+			;;
+			*)
+				panic "Unsupported container file system"
+			;;
+		esac 
+	else
+		panic "Unable to find ${overlay_loop_ro} file"
+	fi			
 	maybe_break after-overlay
 }
 
@@ -381,6 +391,7 @@ mountroot() {
 	# пока что тут
 	mkdir -p "${live_temp_path}"
 
+	setup_storage
 	setup_tmp_storage
 	setup_union_fs
 	cleanup
