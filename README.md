@@ -51,10 +51,10 @@ boot=overlay2 storage-uuid=1234-5678 overlay-loop=debian.squashfs persistence-sr
 ## Требования и зависимости
 
 ### Исполняемые файлы
-`openssl`, `cryptsetup`, `askpass`
+> `openssl`, `cryptsetup`, `askpass`
 
 ### Модули
-`overlay`, `loop`, `dm-mod`, `dm-crypt`, `af_alg`, `algif_skcipher`, `algif_hash`, `crypto_user`, `aes_generic`, `aesni-intel`, `xts`, `sha256`, `sha512`, `squashfs`, `ext2`, `ext3`, `ext4`, `f2fs`, `vfat`, `exfat`, `ntfs3`, `xfs`, `jffs2`, `nls_cp437`, `nls_ascii`, `nls_utf8`, `nls_cp866`
+> `overlay`, `loop`, `dm-mod`, `dm-crypt`, `af_alg`, `algif_skcipher`, `algif_hash`, `crypto_user`, `aes_generic`, `aesni-intel`, `xts`, `sha256`, `sha512`, `squashfs`, `ext2`, `ext3`, `ext4`, `f2fs`, `vfat`, `exfat`, `ntfs3`, `xfs`, `jffs2`, `nls_cp437`, `nls_ascii`, `nls_utf8`, `nls_cp866`
 
 ## Сборка и установка
 
