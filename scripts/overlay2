@@ -321,7 +321,7 @@ setup_storage() {
 		panic "Bad storage filesystem"
 	fi
 
-	case "${storage_type}" is
+	case "${storage_type}" in
 		ext2|ext3|ext4|f2f2|exfat|vfat|ntfs)
 			local storage_mnt="/run/${live_directory}/storage-${storage_uuid}"
 			mkdir -p "${storage_mnt}"
