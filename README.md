@@ -37,6 +37,17 @@ boot=overlay2 storage-uuid=1234-5678 overlay-loop=debian.squashfs persistence-sr
 | Режим отдельного заголовка | `persistene-loop=persistence.luks`, `persistene-key-file=kyes.luks`, `tmp-storage-uuid=1234-5678`, `persistence-header=header_file` | Ключ шифрования (см. выше) как и заголовк лежат на доверенном носителе |
 | Режим отдельного заголовка, зашифрованного в *aes-256-ctr* | `persistene-loop=persistence.luks`, `persistene-key-file=kyes.luks`, `tmp-storage-uuid=1234-5678`, `persistence-header=header_file`, `ssl-keys-file=ssl.txt` | Файл с ключами SSL так-же хранится на доверенном носителе |
 
+## Точки останова
+| Название | Описание |
+| --- | --- |
+| `persistence-ram` | После монтирования persistence в RAM |
+| `persistence-storage` | После монтирования persistence раздела |
+| `persistence-loop` | После монтирования persistence файла |
+| `do-storage` | До монтирования основного устройства |
+| `after-storage` | После монтирования основного устройства |
+| `do-overlay` | До монтирования OverlayFS |
+| `after-overlay` | После монтирования основного устройства |
+
 ## Сборка и установка
 
 ### Сборка Debian-пакета

@@ -281,6 +281,8 @@ setup_persistence_storage() {
 			else
 				panic "Block device ${persistence_storage_dev} not found"
 			fi
+
+			maybe_break persistence-storage
 		;;
 		loop)
 			local persistence_storage_loop="/run/${live_directory}/storage-${storage_uuid}/${persistence_loop}"
@@ -290,6 +292,8 @@ setup_persistence_storage() {
 			else
 				panic "File ${persistence_loop} not found"
 			fi
+
+			maybe_break persistence-loop
 		;;
 	esac
 
@@ -346,7 +350,7 @@ setup_union_fs() {
 	if [ -f "${overlay_loop_ro}" ]; then
 		local overlay_loop_ro_type=$(get_fs_tag "${overlay_loop_ro}" "TYPE")
 		case "${overlay_loop_ro_type}" in
-			squashfs|btrfs|iso9660|xfs|jffs2)
+			ext2|ext3|ext4|squashfs|btrfs|iso9660|xfs|jffs2)
 				mkdir -p "${overlay_loop_mnt}"
 				if ! mount -o loop,ro -t "${overlay_loop_ro_type}" "${overlay_loop_ro}" "${overlay_loop_mnt}"; then
 					panic "Unable to mount overlay container"
