@@ -12,7 +12,7 @@
 | --- | --- |
 | `boot=overlay2` | Включает сценарий загрузки. |
 | `storage-uuid=` | UUID носителя с образом системы. |
-| `overlay-loop=` | Путь к файлу образа относительно основного носителя. Поддерживаются `squashfs`, `btrfs` и `iso9660`. |
+| `overlay-loop=` | Путь к файлу образа относительно основного носителя. Поддерживаются `ext2`, `ext3`, `ext4`, `xfs`, `jffs2`, `squashfs`, `btrfs` и `iso9660`. |
 | `persistence-src=` | Режим writable-слоя: `ram`, `storage` или `loop`. |
 | `persistence-ram-size=` | Размер tmpfs для режима `ram`; значение по умолчанию — `50%`. |
 | `persistence-storage-uuid=` | UUID раздела для режима `storage`. |
